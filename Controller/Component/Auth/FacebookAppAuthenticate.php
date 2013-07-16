@@ -37,24 +37,27 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	    'app_secret' => null,
 	    'canvas_page' => null,
 	    'userModel' => 'FacebookCanvas.CanvasUser',
+	    'modelCallbacks' => array(
+		'register' => null, //called after _findUser() if it return empty
+	    ),
 	    'fields' => array(
-		'username' => 'username',
-		'password' => 'password'
+		'facebook_id' => 'facebook_id',
 	    ),
 	    'recursive' => 0,
 	    'contain' => null,
-	    'session_namespace' => 'Facebook',
-	    'loginAction' => array(
-		'admin' => false,
-		'plugin' => 'facebook_canvas',
-		'controller' => 'canvas_users',
-		'action' => 'login',
-	    ),
+	    'scope' => array(), //not to be confused with Facebook scope
 	    'urls' => array(
 		'get_access_token' => 'https://graph.facebook.com/oauth/access_token',
 		'get_user_data' => 'https://graph.facebook.com/me',
 	    ),
 	);
+
+	/**
+	 * The user model instance
+	 *
+	 * @var Model
+	 */
+	protected $_userObj;
 
 	/**
 	 * Constructor
@@ -66,7 +69,22 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		$settings = array_merge($this->settings, $settings);
 		parent::__construct($collection, $settings);
 		$this->http = new HttpSocket();
+		$this->_initUserObj();
 		$this->_initComponentCollection();
+	}
+
+	/**
+	 * Initializes the user model
+	 *
+	 * @return void
+	 */
+	protected function _initUserObj() {
+		list($plugin, $className) = pluginSplit($this->settings['userModel'], true);
+		$classLocation = ($plugin) ? $plugin . 'Model' : 'Model';
+		if (App::load($className) === false) {
+			App::uses($className, $classLocation);
+		}
+		$this->_userObj = App::load($className);
 	}
 
 	/**
@@ -108,7 +126,6 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		 */
 		//$state = $this->FacebookApp->sessionRead('state');
 		$access_token = false;
-
 		if (isset($request->query['code'])) {// && isset($request->query['state']) && $request->query['state'] == $state) {
 			$auth_params = $this->_getAccessToken($request->query['code']);
 			if (isset($auth_params['access_token'])) {
@@ -134,11 +151,20 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 				return false;
 			}
 			$fbuserData['access_token'] = $access_token;
-			$this->_saveUser($fbuserData);
+			//$this->_saveUser($fbuserData);
 			$conditions = array(
-			    'id' => $fbuserData['id']
+			    $this->settings['fields']['facebook_id'] => $fbuserData['id']
 			);
-			return $this->_findUser($conditions);
+			$user = $this->_findUser($conditions);
+			if (
+				!$user &&
+				method_exists($this->_userObj, $this->settings['modelCallbacks']['register'])
+			) {
+				$user = $this->_userObj->{$this->settings['modelCallbacks']['register']}($fbuserData);
+			} else {
+				$user = $fbuserData;
+			}
+			return $user;
 		}
 		return false;
 	}
@@ -149,7 +175,7 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	protected function _getAccessToken($code) {
 		$query = array(
 		    'client_id' => $this->settings['app_id'],
-		    'redirect_uri' => Router::url($this->settings['loginAction'], true),
+		    'redirect_uri' => Router::url(null, true),
 		    'client_secret' => $this->settings['app_secret'],
 		    'code' => $code,
 		);
@@ -178,6 +204,7 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	 * @todo This method is too spesific. Instead, the auth object should take in a model and method to send data to.
 	 */
 	protected function _saveUser($userData) {
+		prd($userData);
 		$userData['is_registered'] = true;
 		$userModel = $this->settings['userModel'];
 		list(, $model) = pluginSplit($userModel);
@@ -207,7 +234,7 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	 * @return string $decoded
 	 */
 	protected function _base64_url_decode($encoded) {
-		$decoded = base64_decode(strtr($input, '-_', '+/'));
+		$decoded = base64_decode(strtr($encoded, '-_', '+/'));
 		return $decoded;
 	}
 

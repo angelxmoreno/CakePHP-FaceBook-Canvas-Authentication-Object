@@ -1,6 +1,7 @@
 <?php
 
 App::uses('Component', 'Controller');
+
 /**
  * Loads the settings for AuthComponent and FacebookAppAuthenticate
  *
@@ -18,31 +19,27 @@ class FacebookAppComponent extends Component {
 	 * @var array
 	 */
 	public $settings = array(
-	    'autoLogin' => false,
+	    'autoLogin' => true,
 	    'app_id' => null,
 	    'app_secret' => null,
 	    'canvas_page' => null,
-	    'scope' => array('email'),
-	    'userModel' => 'FacebookCanvas.CanvasUser',
+	    'perms' => array('email'),
 	    'session_namespace' => 'FacebookApp',
-	    'loginAction' => array(
-		'admin' => false,
-		'plugin' => 'facebook_canvas',
-		'controller' => 'canvas_users',
-		'action' => 'login',
-	    ),
+	    'registerMethod' => null,
+	    'fields' => array('facebook_id' => 'facebook_id')
 	);
 
 	/**
-	 * Settings configurable through bootstrap
+	 * Required sesstings
+	 * These can be set via $Controller ->comomponents() or
+	 * Configure('FacebookApp', array());
 	 *
 	 * @var array
 	 */
-	protected $_configurableSettings = array(
+	protected $_requiredSettings = array(
 	    'app_id',
 	    'app_secret',
 	    'canvas_page',
-	    'scope',
 	);
 
 	/**
@@ -59,13 +56,12 @@ class FacebookAppComponent extends Component {
 	 * @param array $settings Array of configuration settings.
 	 */
 	public function __construct(ComponentCollection $collection, $settings = array()) {
-		$settings = array_merge($this->settings, $settings);
+		$boostrapSettings = Configure::check('FacebookApp') ? Configure::read('FacebookApp') : array();
+		$settings = array_merge($this->settings, $boostrapSettings, $settings);
 		parent::__construct($collection, $settings);
-		foreach ($this->_configurableSettings as $configurableSetting) {
-			if (is_null($this->settings[$configurableSetting]) && Configure::check('FacebookApp.' . $configurableSetting)) {
-				$this->settings[$configurableSetting] = Configure::read('FacebookApp.' . $configurableSetting);
-			} elseif (is_null($this->settings[$configurableSetting]) && !Configure::check('FacebookApp.' . $configurableSetting)) {
-				throw new CakeException('Missing parameter:"' . $configurableSetting . '"');
+		foreach ($this->_requiredSettings as $requiredSetting) {
+			if (is_null($this->settings[$requiredSetting])) {
+				throw new CakeException('Missing parameter:"' . $requiredSetting . '"');
 			}
 		}
 	}
@@ -77,43 +73,11 @@ class FacebookAppComponent extends Component {
 	 * @return void
 	 */
 	public function initialize(Controller $controller) {
-		$this->_authSetUp();
+		$this->Auth->authenticate['FacebookCanvas.FacebookApp'] = $this->settings;
+		if ($user = $this->Auth->identify($controller->request, $controller->response)) {
+			$this->Auth->login($user);
+		}
 		$controller->set('CanvasSettings', $this->settings);
-	}
-
-	/**
-	 * Called after the Controller::beforeFilter() and before the controller action
-	 *
-	 * @param Controller $controller Controller with components to startup
-	 * @return void
-	 */
-	public function startup(Controller $controller) {
-
-	}
-
-	/**
-	 * Sets up AuthComponent
-	 *
-	 * @return void
-	 */
-	protected function _authSetUp() {
-		$this->Auth->authorize = array('Controller');
-		$this->Auth->authenticate = array(
-		    'FacebookCanvas.FacebookApp' => array(
-			'app_id' => $this->settings['app_id'],
-			'app_secret' => $this->settings['app_secret'],
-			'canvas_page' => $this->settings['canvas_page'],
-			'userModel' => $this->settings['userModel'],
-			'session_namespace' => $this->settings['session_namespace'],
-			'loginAction' => $this->settings['loginAction'],
-		    )
-		);
-		$this->Auth->allow('display');
-
-		$this->Auth->loginRedirect = $this->settings['canvas_page'];
-		$this->Auth->logoutRedirect = '/';
-		$this->Auth->authError = 'Did you really think you are allowed to see that?';
-		$this->Auth->loginAction = $this->settings['loginAction'];
 	}
 
 	/**
@@ -126,12 +90,31 @@ class FacebookAppComponent extends Component {
 		$auth_url = 'https://www.facebook.com/dialog/oauth?client_id=';
 		$auth_url .= $this->settings['app_id'];
 		$auth_url .= '&scope=';
-		$auth_url .= implode(',',$this->settings['scope']);
+		$auth_url .= implode(',', $this->settings['perms']);
 		$auth_url .= '&state=';
 		$auth_url .= $state;
 		$auth_url .= '&redirect_uri=';
-		$auth_url .= urlencode(Router::url($this->settings['loginAction'], true));
+		$auth_url .= urlencode($this->settings['canvas_page']);
 		return $auth_url;
+	}
+
+	/**
+	 * Create a random string and saves it to session. This is used to protect against Cross-site Request Forgery
+	 *
+	 * @return String
+	 * @deprecated API might no longer need this
+	 */
+	protected function _createStateSecret() {
+		$state = sprintf('fb_%s_state', $this->Auth->password(String::uuid()));
+		$this->sessionWrite('state', $state);
+	}
+
+	/**
+	 * deletes all session data
+	 * @return void
+	 */
+	public function logout() {
+		$this->Session->delete($this->settings['session_namespace']);
 	}
 
 	/**
