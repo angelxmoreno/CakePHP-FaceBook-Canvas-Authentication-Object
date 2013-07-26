@@ -126,6 +126,7 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		 */
 		//$state = $this->FacebookApp->sessionRead('state');
 		$access_token = false;
+
 		if (isset($request->query['code'])) {// && isset($request->query['state']) && $request->query['state'] == $state) {
 			$auth_params = $this->_getAccessToken($request->query['code']);
 			if (isset($auth_params['access_token'])) {
@@ -141,6 +142,11 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		}
 		if ($this->FacebookApp->sessionRead('decoded_request.user_id') && $this->FacebookApp->sessionRead('decoded_request.oauth_token')) {
 			$access_token = $this->FacebookApp->sessionRead('decoded_request.oauth_token');
+			$token_expires = $this->FacebookApp->sessionRead('decoded_request.expires');
+			$token_issued = $this->FacebookApp->sessionRead('decoded_request.issued_at');
+			if ($token_expires < time()) {
+				//token has expired
+			}
 		}
 
 		if ($access_token) {
@@ -199,18 +205,6 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		$response = $this->http->get($this->settings['urls']['get_user_data'], $query);
 		$data = json_decode($response->body, true);
 		return $data;
-	}
-
-	/**
-	 * Saves the user and returns an array on success
-	 * @todo This method is too spesific. Instead, the auth object should take in a model and method to send data to.
-	 */
-	protected function _saveUser($userData) {
-		$userData['is_registered'] = true;
-		$userModel = $this->settings['userModel'];
-		list(, $model) = pluginSplit($userModel);
-		$result = ClassRegistry::init($userModel)->save($userData);
-		return current($result);
 	}
 
 	/**

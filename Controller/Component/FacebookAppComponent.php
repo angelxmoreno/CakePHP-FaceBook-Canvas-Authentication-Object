@@ -74,7 +74,7 @@ class FacebookAppComponent extends Component {
 	 */
 	public function initialize(Controller $controller) {
 		$this->Auth->authenticate['FacebookCanvas.FacebookApp'] = $this->settings;
-		if ($user = $this->Auth->identify($controller->request, $controller->response)) {
+		if (!$this->Auth->loggedIn() && $user = $this->Auth->identify($controller->request, $controller->response)) {
 			$this->Auth->login($user);
 		}
 		$controller->set('CanvasSettings', $this->settings);
