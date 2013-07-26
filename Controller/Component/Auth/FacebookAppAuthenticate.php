@@ -39,9 +39,11 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	    'userModel' => 'FacebookCanvas.CanvasUser',
 	    'modelCallbacks' => array(
 		'register' => null, //called after _findUser() if it return empty
+		'update' => null, //called after _findUser() if it returns a user
 	    ),
 	    'fields' => array(
 		'facebook_id' => 'facebook_id',
+		'password' => 'password'
 	    ),
 	    'recursive' => 0,
 	    'contain' => null,
@@ -81,10 +83,8 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	protected function _initUserObj() {
 		list($plugin, $className) = pluginSplit($this->settings['userModel'], true);
 		$classLocation = ($plugin) ? $plugin . 'Model' : 'Model';
-		if (App::load($className) === false) {
-			App::uses($className, $classLocation);
-		}
-		$this->_userObj = App::load($className);
+		App::uses($className, $classLocation);
+		$this->_userObj = new $className();
 	}
 
 	/**
@@ -151,7 +151,6 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 				return false;
 			}
 			$fbuserData['access_token'] = $access_token;
-			//$this->_saveUser($fbuserData);
 			$conditions = array(
 			    $this->settings['fields']['facebook_id'] => $fbuserData['id']
 			);
@@ -161,8 +160,11 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 				method_exists($this->_userObj, $this->settings['modelCallbacks']['register'])
 			) {
 				$user = $this->_userObj->{$this->settings['modelCallbacks']['register']}($fbuserData);
-			} else {
-				$user = $fbuserData;
+			} elseif (
+				$user &&
+				method_exists($this->_userObj, $this->settings['modelCallbacks']['update'])
+			) {
+				$user = $this->_userObj->{$this->settings['modelCallbacks']['update']}($user, $fbuserData);
 			}
 			return $user;
 		}
@@ -204,7 +206,6 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 	 * @todo This method is too spesific. Instead, the auth object should take in a model and method to send data to.
 	 */
 	protected function _saveUser($userData) {
-		prd($userData);
 		$userData['is_registered'] = true;
 		$userModel = $this->settings['userModel'];
 		list(, $model) = pluginSplit($userModel);
