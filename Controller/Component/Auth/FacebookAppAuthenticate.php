@@ -150,6 +150,11 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		}
 
 		if ($access_token) {
+			$longer_access = $this->getExtendedAccessToken($access_token);
+			if ($longer_access && isset($longer_access['access_token']) && isset($longer_access['expires'])) {
+				$access_token = $longer_access['access_token'];
+				$auth_params = $longer_access;
+			}
 			$token_expires = isset($auth_params['expires']) ? $auth_params['expires'] : null;
 
 			$fbuserData = $this->_getFBUserData($access_token);
@@ -157,6 +162,7 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 				return false;
 			}
 			$fbuserData['access_token'] = $access_token;
+			$fbuserData['access_expires'] = date('Y-m-d H:i:s', time() + $token_expires);
 			$conditions = array(
 			    $this->settings['fields']['facebook_id'] => $fbuserData['id']
 			);
@@ -192,6 +198,43 @@ class FacebookAppAuthenticate extends BaseAuthenticate {
 		$params = null;
 		parse_str($response->body, $params);
 		return $params;
+	}
+
+	/**
+	 * Extend an access token, while removing the short-lived token that might
+	 * have been generated via client-side flow. Thanks to http://bit.ly/b0Pt0H
+	 * for the workaround.
+	 */
+	public function getExtendedAccessToken($access_token) {
+		try {
+			$params = array(
+				'client_id' => $this->settings['app_id'],
+				'client_secret' => $this->settings['app_secret'],
+				'grant_type' => 'fb_exchange_token',
+				'fb_exchange_token' => $access_token,
+				'access_token' => $access_token,
+				'appsecret_proof' => hash_hmac('sha256', $access_token, $this->settings['app_secret']),
+			);
+			$url = $this->settings['urls']['get_access_token'];
+			$response = $this->http->get($url, $params);
+			$access_token_response = $response->body;
+		} catch (Exception $e) {
+			// most likely that user very recently revoked authorization.
+			// In any event, we don't have an access token, so say so.
+			return false;
+		}
+
+		if (empty($access_token_response)) {
+			return false;
+		}
+
+		$response_params = array();
+		parse_str($access_token_response, $response_params);
+
+		if (!isset($response_params['access_token'])) {
+			return false;
+		}
+		return $response_params;
 	}
 
 	/**
